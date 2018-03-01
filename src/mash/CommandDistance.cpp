@@ -54,6 +54,7 @@ int CommandDistance::run() const
     //bool log = options.at("log").active;
     double pValueMax = options.at("pvalue").getArgumentAsNumber();
     double distanceMax = options.at("distance").getArgumentAsNumber();
+    ::std::ios::sync_with_stdio(false);
     
     Sketch::Parameters parameters;
     
@@ -267,7 +268,7 @@ void CommandDistance::writeOutput(CompareOutput * output, bool table) const
         }
         else if ( pair->pass )
         {
-            cout << output->sketchRef.getReference(j).name << '\t' << output->sketchQuery.getReference(i).name << '\t' << pair->distance << '\t' << pair->pValue << '\t' << pair->numer << '/' << pair->denom << endl;
+            cout << output->sketchRef.getReference(j).name << '\t' << output->sketchQuery.getReference(i).name << '\t' << static_cast<double>(pair->numer) / pair->denom << '\t' << pair->distance << '\t' << pair->pValue << '\t' << pair->numer << '/' << pair->denom << '\n';
         }
     
         j++;
@@ -276,7 +277,7 @@ void CommandDistance::writeOutput(CompareOutput * output, bool table) const
         {
             if ( table )
             {
-                cout << endl;
+                cout << '\n';
             }
             
             j = 0;
