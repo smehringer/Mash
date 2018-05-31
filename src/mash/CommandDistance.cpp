@@ -33,6 +33,7 @@ CommandDistance::CommandDistance()
     
     useOption("help");
     addOption("list", Option(Option::Boolean, "l", "Input", "List input. Lines in each <query> specify paths to sequence files, one per line. The reference file is not affected.", ""));
+    addOption("jaccard", Option(Option::Boolean, "j", "Output", "Emit jaccard index instead of mash distance.", ""));
     addOption("table", Option(Option::Boolean, "t", "Output", "Table output (will not report p-values, but fields will be blank if they do not meet the p-value threshold).", ""));
     //addOption("log", Option(Option::Boolean, "L", "Output", "Log scale distances and divide by k-mer size to provide a better analog to phylogenetic distance. The special case of zero shared min-hashes will result in a distance of 1.", ""));
     addOption("pvalue", Option(Option::Number, "v", "Output", "Maximum p-value to report.", "1.0", 0., 1.));
@@ -105,6 +106,7 @@ int CommandDistance::run() const
     {
         cerr << "Sketching " << fileReference << " (provide sketch file made with \"mash sketch\" to skip)...";
     }
+    const bool emitJaccard = options.at("jaccard").active;
     
     vector<string> refArgVector;
     refArgVector.push_back(fileReference);
@@ -222,7 +224,7 @@ int CommandDistance::run() const
             j -= sketchRef.getReferenceCount();
         }
         
-        threadPool.runWhenThreadAvailable(new CompareInput(sketchRef, sketchQuery, j, i, pairsPerThread, parameters, distanceMax, pValueMax));
+        threadPool.runWhenThreadAvailable(new CompareInput(sketchRef, sketchQuery, j, i, pairsPerThread, parameters, distanceMax, pValueMax, emitJaccard));
         
         while ( threadPool.outputAvailable() )
         {
@@ -268,7 +270,7 @@ void CommandDistance::writeOutput(CompareOutput * output, bool table) const
         }
         else if ( pair->pass )
         {
-            cout << output->sketchRef.getReference(j).name << '\t' << output->sketchQuery.getReference(i).name << '\t' << static_cast<double>(pair->numer) / pair->denom << '\t' << pair->distance << '\t' << pair->pValue << '\t' << pair->numer << '/' << pair->denom << '\n';
+            cout << output->sketchRef.getReference(j).name << '\t' << output->sketchQuery.getReference(i).name << '\t' << (output->emitJaccard ? (static_cast<double>(pair->numer) / pair->denom): pair->distance) << '\t' << pair->pValue << '\t' << pair->numer << '/' << pair->denom << '\n';
         }
     
         j++;
@@ -293,7 +295,7 @@ CommandDistance::CompareOutput * compare(CommandDistance::CompareInput * input)
     const Sketch & sketchRef = input->sketchRef;
     const Sketch & sketchQuery = input->sketchQuery;
     
-    CommandDistance::CompareOutput * output = new CommandDistance::CompareOutput(input->sketchRef, input->sketchQuery, input->indexRef, input->indexQuery, input->pairCount);
+    CommandDistance::CompareOutput * output = new CommandDistance::CompareOutput(input->sketchRef, input->sketchQuery, input->indexRef, input->indexQuery, input->pairCount, input->emitJaccard);
     
     uint64_t sketchSize = sketchQuery.getMinHashesPerWindow() < sketchRef.getMinHashesPerWindow() ?
         sketchQuery.getMinHashesPerWindow() :
@@ -304,7 +306,7 @@ CommandDistance::CompareOutput * compare(CommandDistance::CompareInput * input)
     
     for ( uint64_t k = 0; k < input->pairCount && i < sketchQuery.getReferenceCount(); k++ )
     {
-        compareSketches(&output->pairs[k], sketchRef.getReference(j), sketchQuery.getReference(i), sketchSize, sketchRef.getKmerSize(), sketchRef.getKmerSpace(), input->maxDistance, input->maxPValue);
+        compareSketches(&output->pairs[k], sketchRef.getReference(j), sketchQuery.getReference(i), sketchSize, sketchRef.getKmerSize(), sketchRef.getKmerSpace(), input->maxDistance, input->maxPValue, input->emitJaccard);
         
         j++;
         
@@ -318,7 +320,7 @@ CommandDistance::CompareOutput * compare(CommandDistance::CompareInput * input)
     return output;
 }
 
-void compareSketches(CommandDistance::CompareOutput::PairOutput * output, const Sketch::Reference & refRef, const Sketch::Reference & refQry, uint64_t sketchSize, int kmerSize, double kmerSpace, double maxDistance, double maxPValue)
+void compareSketches(CommandDistance::CompareOutput::PairOutput * output, const Sketch::Reference & refRef, const Sketch::Reference & refQry, uint64_t sketchSize, int kmerSize, double kmerSpace, double maxDistance, double maxPValue, bool emitJaccard)
 {
     uint64_t i = 0;
     uint64_t j = 0;
@@ -370,7 +372,7 @@ void compareSketches(CommandDistance::CompareOutput::PairOutput * output, const 
     }
     
     double distance;
-    double jaccard = double(common) / denom;
+    const double jaccard = double(common) / denom;
     
     if ( common == denom ) // avoid -0
     {
@@ -385,8 +387,12 @@ void compareSketches(CommandDistance::CompareOutput::PairOutput * output, const 
         //distance = log(double(common + 1) / (denom + 1)) / log(1. / (denom + 1));
         distance = -log(2 * jaccard / (1. + jaccard)) / kmerSize;
     }
-    
-    if ( distance > maxDistance )
+    if ( emitJaccard ) {
+        if ( jaccard < maxDistance ) {
+            return;
+        }
+    }
+    else if ( distance > maxDistance )
     {
         return;
     }

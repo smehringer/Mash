@@ -18,7 +18,7 @@ public:
     
     struct CompareInput
     {
-        CompareInput(const Sketch & sketchRefNew, const Sketch & sketchQueryNew, uint64_t indexRefNew, uint64_t indexQueryNew, uint64_t pairCountNew, const Sketch::Parameters & parametersNew, double maxDistanceNew, double maxPValueNew)
+        CompareInput(const Sketch & sketchRefNew, const Sketch & sketchQueryNew, uint64_t indexRefNew, uint64_t indexQueryNew, uint64_t pairCountNew, const Sketch::Parameters & parametersNew, double maxDistanceNew, double maxPValueNew, bool emit_jaccard)
             :
             sketchRef(sketchRefNew),
             sketchQuery(sketchQueryNew),
@@ -27,7 +27,8 @@ public:
             pairCount(pairCountNew),
             parameters(parametersNew),
             maxDistance(maxDistanceNew),
-            maxPValue(maxPValueNew)
+            maxPValue(maxPValueNew),
+            emitJaccard(emit_jaccard)
             {}
         
         const Sketch & sketchRef;
@@ -40,17 +41,19 @@ public:
         const Sketch::Parameters & parameters;
         double maxDistance;
         double maxPValue;
+        bool emitJaccard;
     };
     
     struct CompareOutput
     {
-        CompareOutput(const Sketch & sketchRefNew, const Sketch & sketchQueryNew, uint64_t indexRefNew, uint64_t indexQueryNew, uint64_t pairCountNew)
+        CompareOutput(const Sketch & sketchRefNew, const Sketch & sketchQueryNew, uint64_t indexRefNew, uint64_t indexQueryNew, uint64_t pairCountNew, bool emit_jaccard)
             :
             sketchRef(sketchRefNew),
             sketchQuery(sketchQueryNew),
             indexRef(indexRefNew),
             indexQuery(indexQueryNew),
-            pairCount(pairCountNew)
+            pairCount(pairCountNew),
+            emitJaccard(emit_jaccard)
         {
             pairs = new PairOutput[pairCount];
         }
@@ -77,6 +80,7 @@ public:
         uint64_t pairCount;
         
         PairOutput * pairs;
+        bool emitJaccard;
     };
     
     CommandDistance();
@@ -89,7 +93,7 @@ private:
 };
 
 CommandDistance::CompareOutput * compare(CommandDistance::CompareInput * input);
-void compareSketches(CommandDistance::CompareOutput::PairOutput * output, const Sketch::Reference & refRef, const Sketch::Reference & refQry, uint64_t sketchSize, int kmerSize, double kmerSpace, double maxDistance, double maxPValue);
+void compareSketches(CommandDistance::CompareOutput::PairOutput * output, const Sketch::Reference & refRef, const Sketch::Reference & refQry, uint64_t sketchSize, int kmerSize, double kmerSpace, double maxDistance, double maxPValue, bool emit_jaccard);
 double pValue(uint64_t x, uint64_t lengthRef, uint64_t lengthQuery, double kmerSpace, uint64_t sketchSize);
 
 } // namespace mash
