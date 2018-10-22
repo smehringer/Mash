@@ -19,16 +19,18 @@ public:
     
     struct TriangleInput
     {
-        TriangleInput(const Sketch & sketchNew, uint64_t indexNew, const Sketch::Parameters & parametersNew)
+        TriangleInput(const Sketch & sketchNew, uint64_t indexNew, const Sketch::Parameters & parametersNew, bool emitJaccard_=false)
             :
             sketch(sketchNew),
             index(indexNew),
-            parameters(parametersNew)
+            parameters(parametersNew),
+            emitJaccard(emitJaccard_)
             {}
         
         const Sketch & sketch;
         uint64_t index;
         const Sketch::Parameters & parameters;
+        const bool emitJaccard;
     };
     
     struct TriangleOutput
