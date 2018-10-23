@@ -35,6 +35,7 @@ CommandTriangle::CommandTriangle()
     useOption("help");
     addOption("list", Option(Option::Boolean, "l", "Input", "List input. Lines in each <query> specify paths to sequence files, one per line. The reference file is not affected.", ""));
     addOption("comment", Option(Option::Boolean, "C", "Output", "Use comment fields for sequence names instead of IDs.", ""));
+    addOption("jaccard", Option(Option::Boolean, "j", "Output", "Emit Jaccard index instead of mash distance"));
     //addOption("log", Option(Option::Boolean, "L", "Output", "Log scale distances and divide by k-mer size to provide a better analog to phylogenetic distance. The special case of zero shared min-hashes will result in a distance of 1.", ""));
     useSketchOptions();
 }
@@ -59,6 +60,7 @@ int CommandTriangle::run() const
     {
         return 1;
     }
+    const bool emitJaccard = getOption("jaccard").getArgumentAsNumber();
 
     if ( arguments.size() == 1 )
     {
@@ -116,7 +118,7 @@ int CommandTriangle::run() const
 
     for ( uint64_t i = 1; i < sketch.getReferenceCount(); i++ )
     {
-        threadPool.runWhenThreadAvailable(new TriangleInput(sketch, i, parameters));
+        threadPool.runWhenThreadAvailable(new TriangleInput(sketch, i, parameters, emitJaccard));
 
         while ( threadPool.outputAvailable() )
         {
