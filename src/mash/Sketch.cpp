@@ -23,6 +23,8 @@
 #include <capnp/serialize.h>
 #include <sys/mman.h>
 #include <math.h>
+#include <list>
+#include <string.h>
 
 #define SET_BINARY_MODE(file)
 #define CHUNK 16384
@@ -91,6 +93,15 @@ uint64_t Sketch::getReferenceIndex(string id) const
     }
 }
 
+void Sketch::initFromReads(const vector<string> & files, const Parameters & parametersNew)
+{
+    parameters = parametersNew;
+    
+	useThreadOutput(sketchFile(new SketchInput(files, 0, 0, "", "", parameters)));
+	
+    createIndex();
+}
+
 int Sketch::initFromFiles(const vector<string> & files, const Parameters & parametersNew, int verbosity, bool enforceParameters, bool contain)
 {
     parameters = parametersNew;
@@ -155,9 +166,11 @@ int Sketch::initFromFiles(const vector<string> & files, const Parameters & param
             
             // init fully
             //
-			threadPool.runWhenThreadAvailable(new SketchInput(files[i], 0, 0, "", "", parameters), loadCapnp);
+            vector<string> file;
+            file.push_back(files[i]);
+			threadPool.runWhenThreadAvailable(new SketchInput(file, 0, 0, "", "", parameters), loadCapnp);
         }
-        else      
+        else
 		{
 			FILE * inStream;
 		
@@ -192,8 +205,10 @@ int Sketch::initFromFiles(const vector<string> & files, const Parameters & param
 				{
 					fclose(inStream);
 				}
-			
-				threadPool.runWhenThreadAvailable(new SketchInput(files[i], 0, 0, "", "", parameters), sketchFile);
+				
+				vector<string> file;
+				file.push_back(files[i]);
+				threadPool.runWhenThreadAvailable(new SketchInput(file, 0, 0, "", "", parameters), sketchFile);
 			}
 			else
 			{
@@ -257,6 +272,14 @@ uint64_t Sketch::initParametersFromCapnp(const char * file)
     
     void * data = mmap(NULL, fileInfo.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     
+    if (data == MAP_FAILED)
+    {
+        uint64_t fileSize = fileInfo.st_size;
+        std::cerr << "Error: could not memory-map file " << file << " of size " << fileSize;
+        std::cerr << std::endl;
+        exit(1);
+    }
+
     capnp::ReaderOptions readerOptions;
     
     readerOptions.traversalLimitInWords = 1000000000000;
@@ -327,7 +350,7 @@ bool Sketch::sketchFileBySequence(FILE * file, ThreadPool<Sketch::SketchInput, S
 		//
 		memcpy(seqCopy, seq->seq.s, l);
 		
-		threadPool->runWhenThreadAvailable(new SketchInput("", seqCopy, l, string(seq->name.s, seq->name.l), string(seq->comment.s, seq->comment.l), parameters), sketchSequence);
+		threadPool->runWhenThreadAvailable(new SketchInput(vector<string>(), seqCopy, l, string(seq->name.s, seq->name.l), string(seq->comment.s, seq->comment.l), parameters), sketchSequence);
 		
 		while ( threadPool->outputAvailable() )
 		{
@@ -570,10 +593,12 @@ void addMinHashes(MinHashHeap & minHashHeap, char * seq, uint64_t length, const 
             if ( debug ) cout << endl;
         }
         
-        const char * kmer = useRevComp ? seqRev + length - i - kmerSize : seq + i;
+        const char *kmer_fwd = seq + i;
+        const char *kmer_rev = seqRev + length - i - kmerSize;
+        const char * kmer = memcmp(kmer_fwd, kmer_rev, kmerSize) <= 0 ? kmer_fwd : kmer_rev;
         bool filter = false;
         
-        hash_u hash = getHash(useRevComp ? seqRev + length - i - kmerSize : seq + i, kmerSize, parameters.seed, parameters.use64);
+        hash_u hash = getHash(kmer, kmerSize, parameters.seed, parameters.use64);
         
         if ( debug ) cout << endl;
         
@@ -910,7 +935,7 @@ bool hasSuffix(string const & whole, string const & suffix)
 
 Sketch::SketchOutput * loadCapnp(Sketch::SketchInput * input)
 {
-	const char * file = input->fileName.c_str();
+	const char * file = input->fileNames[0].c_str();
     int fd = open(file, O_RDONLY);
     
     struct stat fileInfo;
@@ -1129,30 +1154,12 @@ void setMinHashesForReference(Sketch::Reference & reference, const MinHashHeap &
 
 Sketch::SketchOutput * sketchFile(Sketch::SketchInput * input)
 {
-	gzFile fp;
-	
-	if ( input->fileName == "-" )
-	{
-		fp = gzdopen(fileno(stdin), "r");
-	}
-	else
-	{
-		fp = gzopen(input->fileName.c_str(), "r");
-	}
-	
-	kseq_t *seq = kseq_init(fp);
-	
 	const Sketch::Parameters & parameters = input->parameters;
 	
 	Sketch::SketchOutput * output = new Sketch::SketchOutput();
 	
 	output->references.resize(1);
 	Sketch::Reference & reference = output->references[0];
-	
-	if ( input->fileName != "-" )
-	{
-		reference.name = input->fileName;
-	}
 	
     MinHashHeap minHashHeap(parameters.use64, parameters.minHashesPerWindow, parameters.reads ? parameters.minCov : 1, parameters.memoryBound);
 
@@ -1163,8 +1170,63 @@ Sketch::SketchOutput * sketchFile(Sketch::SketchInput * input)
     int count = 0;
 	bool skipped = false;
 	
-	while ((l = kseq_read(seq)) >= 0)
+	int fileCount = input->fileNames.size();
+	gzFile fps[fileCount];
+	list<kseq_t *> kseqs;
+	//
+	for ( int f = 0; f < fileCount; f++ )
 	{
+		if ( input->fileNames[f] == "-" )
+		{
+			if ( f > 1 )
+			{
+				cerr << "ERROR: '-' for stdin must be first input" << endl;
+				exit(1);
+			}
+			
+			fps[f] = gzdopen(fileno(stdin), "r");
+		}
+		else
+		{
+			if ( reference.name == "" && input->fileNames[f] != "-" )
+			{
+				reference.name = input->fileNames[f];
+			}
+			
+			fps[f] = gzopen(input->fileNames[f].c_str(), "r");
+			
+			if ( fps[f] == 0 )
+			{
+				cerr << "ERROR: could not open " << input->fileNames[f] << endl;
+				exit(1);
+			}
+		}
+		
+		kseqs.push_back(kseq_init(fps[f]));
+	}
+	
+	list<kseq_t *>::iterator it = kseqs.begin();
+	
+	while ( kseqs.begin() != kseqs.end() )
+	{
+		l = kseq_read(*it);
+		
+		if ( l < -1 ) // error
+		{
+			break;
+		}
+		
+		if ( l == -1 ) // eof
+		{
+			kseq_destroy(*it);
+			it = kseqs.erase(it);
+			if ( it == kseqs.end() )
+			{
+				it = kseqs.begin();
+			}
+			continue;
+		}
+		
 		if ( l < parameters.kmerSize )
 		{
 			skipped = true;
@@ -1173,20 +1235,21 @@ Sketch::SketchOutput * sketchFile(Sketch::SketchInput * input)
 		
 		if ( count == 0 )
 		{
-			if ( input->fileName == "-" )
+			if ( input->fileNames[0] == "-" )
 			{
-				reference.name = seq->name.s;
-				reference.comment = seq->comment.s ? seq->comment.s : "";
+				reference.name = (*it)->name.s;
+				reference.comment = (*it)->comment.s ? (*it)->comment.s : "";
 			}
 			else
 			{
-				reference.comment = seq->name.s;
+				reference.comment = (*it)->name.s;
 				reference.comment.append(" ");
-				reference.comment.append(seq->comment.s ? seq->comment.s : "");
+				reference.comment.append((*it)->comment.s ? (*it)->comment.s : "");
 			}
 		}
 		
 		count++;
+		
 		
 		//if ( verbosity > 0 && parameters.windowed ) cout << '>' << seq->name.s << " (" << l << "nt)" << endl << endl;
 		//if (seq->comment.l) printf("comment: %s\n", seq->comment.s);
@@ -1198,12 +1261,19 @@ Sketch::SketchOutput * sketchFile(Sketch::SketchInput * input)
 			reference.length += l;
 		}
 		
-		addMinHashes(minHashHeap, seq->seq.s, l, parameters);
+		addMinHashes(minHashHeap, (*it)->seq.s, l, parameters);
 		
 		if ( parameters.reads && parameters.targetCov > 0 && minHashHeap.estimateMultiplicity() >= parameters.targetCov )
 		{
 			l = -1; // success code
 			break;
+		}
+		
+		it++;
+		
+		if ( it == kseqs.end() )
+		{
+			it = kseqs.begin();
 		}
 	}
 	
@@ -1231,7 +1301,7 @@ Sketch::SketchOutput * sketchFile(Sketch::SketchInput * input)
 	
 	if (  l != -1 )
 	{
-		cerr << "\nERROR: reading " << input->fileName << "." << endl;
+		cerr << "\nERROR: reading " << (input->fileNames.size() > 0 ? "input files" : input->fileNames[0]) << "." << endl;
 		exit(1);
 	}
 	
@@ -1239,11 +1309,11 @@ Sketch::SketchOutput * sketchFile(Sketch::SketchInput * input)
 	{
 		if ( skipped )
 		{
-			cerr << "\nWARNING: All fasta records in " << input->fileName << " were shorter than the k-mer size (" << parameters.kmerSize << ")." << endl;
+			cerr << "\nWARNING: All fasta records in " << (input->fileNames.size() > 0 ? "input files" : input->fileNames[0]) << " were shorter than the k-mer size (" << parameters.kmerSize << ")." << endl;
 		}
 		else
 		{
-			cerr << "\nERROR: Did not find fasta records in \"" << input->fileName << "\"." << endl;
+			cerr << "\nERROR: Did not find fasta records in \"" << (input->fileNames.size() > 0 ? "input files" : input->fileNames[0]) << "\"." << endl;
 		}
 		
 		exit(1);
@@ -1265,8 +1335,10 @@ Sketch::SketchOutput * sketchFile(Sketch::SketchInput * input)
 	    }
     }
 	
-	kseq_destroy(seq);
-	gzclose(fp);
+	for ( int i = 0; i < fileCount; i++ )
+	{
+		gzclose(fps[i]);
+	}
 	
 	return output;
 }

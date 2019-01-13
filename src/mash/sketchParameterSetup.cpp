@@ -59,6 +59,11 @@ int sketchParameterSetup(Sketch::Parameters & parameters, const Command & comman
     	parameters.genomeSize = command.getOption("genome").getArgumentAsNumber();
     }
     
+    if ( parameters.reads && command.getOption("threads").active )
+    {
+    	cerr << "WARNING: The option " << command.getOption("threads").identifier << " will be ignored with " << command.getOption("reads").identifier << "." << endl;
+    }
+    
     if ( parameters.reads && ! parameters.concatenated )
     {
         cerr << "ERROR: The option " << command.getOption("individual").identifier << " cannot be used with " << command.getOption("reads").identifier << "." << endl;
