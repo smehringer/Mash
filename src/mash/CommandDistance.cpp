@@ -61,7 +61,7 @@ int CommandDistance::run() const
     
     if ( sketchParameterSetup(parameters, *(Command *)this) )
     {
-    	return 1;
+        return 1;
     }
     
     Sketch sketchRef;
@@ -198,7 +198,7 @@ int CommandDistance::run() const
     
     if ( pairsPerThread == 0 )
     {
-    	pairsPerThread = 1;
+        pairsPerThread = 1;
     }
     
     static uint64_t maxPairsPerThread = 0x1000;
@@ -239,7 +239,7 @@ int CommandDistance::run() const
     
     if ( warningCount > 0 && ! parameters.reads )
     {
-    	warnKmerSize(parameters, *this, lengthMax, lengthMaxName, randomChance, kMin, warningCount);
+        warnKmerSize(parameters, *this, lengthMax, lengthMaxName, randomChance, kMin, warningCount);
     }
     
     return 0;
@@ -384,21 +384,10 @@ void compareSketches(CommandDistance::CompareOutput::PairOutput * output, const 
     }
     else
     {
-        //distance = log(double(common + 1) / (denom + 1)) / log(1. / (denom + 1));
-        distance = -log(2 * jaccard / (1. + jaccard)) / kmerSize;
-        
-        if ( distance > 1 )
-        {
-        	distance = 1;
-        }
+        distance = std::min(1., -log(2 * jaccard / (1. + jaccard)) / kmerSize);
     }
-    if ( emitJaccard ) {
-        if ( jaccard < maxDistance ) {
-            return;
-        }
-    }
-    else if ( maxDistance >= 0 && distance > maxDistance )
-    {
+    
+    if ( ( maxDistance >= 0 && distance > maxDistance ) || (emitJaccard && jaccard < maxDistance) ) {
         return;
     }
     
