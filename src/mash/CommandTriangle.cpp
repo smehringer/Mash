@@ -55,7 +55,7 @@ int CommandTriangle::run() const
     bool comment = options.at("comment").active;
     
     Sketch::Parameters parameters;
-
+    
     if ( sketchParameterSetup(parameters, *(Command *)this) )
     {
     	return 1;
@@ -68,7 +68,7 @@ int CommandTriangle::run() const
     }
     
     Sketch sketch;
-
+    
     uint64_t lengthMax;
     double randomChance;
     int kMin;
@@ -76,7 +76,7 @@ int CommandTriangle::run() const
     int warningCount = 0;
     
     vector<string> queryFiles;
-
+    
     for ( int i = 0; i < arguments.size(); i++ )
     {
         if ( list )
@@ -96,7 +96,7 @@ int CommandTriangle::run() const
 	for ( uint64_t i = 0; i < sketch.getReferenceCount(); i++ )
 	{
 		uint64_t length = sketch.getReference(i).length;
-
+		
 		if ( length > lengthThreshold )
 		{
 			if ( warningCount == 0 || length > lengthMax )
@@ -115,7 +115,7 @@ int CommandTriangle::run() const
     cout << (comment ? sketch.getReference(0).comment : sketch.getReference(0).name) << endl;
     
     ThreadPool<TriangleInput, TriangleOutput> threadPool(compare, threads);
-
+    
     for ( uint64_t i = 1; i < sketch.getReferenceCount(); i++ )
     {
         threadPool.runWhenThreadAvailable(new TriangleInput(sketch, i, parameters, emitJaccard));
@@ -137,7 +137,7 @@ int CommandTriangle::run() const
     {
     	warnKmerSize(parameters, *this, lengthMax, lengthMaxName, randomChance, kMin, warningCount);
     }
-
+    
     return 0;
 }
 
@@ -150,7 +150,7 @@ void CommandTriangle::writeOutput(TriangleOutput * output, bool comment, double 
 	
     for ( uint64_t i = 0; i < output->index; i++ )
     {
-	    const CommandDistance::CompareOutput::PairOutput * pair = &output->pairs[i];
+    	const CommandDistance::CompareOutput::PairOutput * pair = &output->pairs[i];
 	    cout << '\t' << pair->distance;
 	    if ( pair->pValue > pValueMax )
 	    {
