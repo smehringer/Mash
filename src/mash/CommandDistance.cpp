@@ -55,13 +55,12 @@ int CommandDistance::run() const
     //bool log = options.at("log").active;
     double pValueMax = options.at("pvalue").getArgumentAsNumber();
     double distanceMax = options.at("distance").getArgumentAsNumber();
-    ::std::ios::sync_with_stdio(false);
     
     Sketch::Parameters parameters;
     
     if ( sketchParameterSetup(parameters, *(Command *)this) )
     {
-        return 1;
+    	return 1;
     }
     
     Sketch sketchRef;
@@ -270,7 +269,7 @@ void CommandDistance::writeOutput(CompareOutput * output, bool table) const
         }
         else if ( pair->pass )
         {
-            cout << output->sketchRef.getReference(j).name << '\t' << output->sketchQuery.getReference(i).name << '\t' << (output->emitJaccard ? (static_cast<double>(pair->numer) / pair->denom): pair->distance) << '\t' << pair->pValue << '\t' << pair->numer << '/' << pair->denom << '\n';
+            cout << output->sketchRef.getReference(j).name << '\t' << output->sketchQuery.getReference(i).name << '\t' << (output->emitJaccard ? (static_cast<double>(pair->numer) / pair->denom): pair->distance) << '\t' << pair->pValue << '\t' << pair->numer << '/' << pair->denom << endl;
         }
     
         j++;
@@ -279,7 +278,7 @@ void CommandDistance::writeOutput(CompareOutput * output, bool table) const
         {
             if ( table )
             {
-                cout << '\n';
+                cout << endl;
             }
             
             j = 0;
@@ -372,7 +371,7 @@ void compareSketches(CommandDistance::CompareOutput::PairOutput * output, const 
     }
     
     double distance;
-    const double jaccard = double(common) / denom;
+    double jaccard = double(common) / denom;
     
     if ( common == denom ) // avoid -0
     {
@@ -384,10 +383,18 @@ void compareSketches(CommandDistance::CompareOutput::PairOutput * output, const 
     }
     else
     {
-        distance = std::min(1., -log(2 * jaccard / (1. + jaccard)) / kmerSize);
+        distance = -log(2 * jaccard / (1. + jaccard)) / kmerSize;
+
+        if ( distance > 1 )
+        {
+            distance = 1;
+        }
     }
-    
-    if ( ( maxDistance >= 0 && distance > maxDistance ) || (emitJaccard && jaccard < maxDistance) ) {
+    if(!emitJaccard) {
+        if ( maxDistance >= 0 && distance > maxDistance ) {
+            return;
+        }
+    } else if ( jaccard < maxDistance ) {
         return;
     }
     

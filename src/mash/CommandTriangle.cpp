@@ -31,7 +31,7 @@ CommandTriangle::CommandTriangle()
     summary = "Estimate a lower-triangular distance matrix.";
     description = "Estimate the distance of each input sequence to every other input sequence. Outputs a lower-triangular distance matrix in relaxed Phylip format. The input sequences can be fasta or fastq, gzipped or not, or Mash sketch files (.msh) with matching k-mer sizes. Input files can also be files of file names (see -l). If more than one input file is provided, whole files are compared by default (see -i).";
     argumentString = "<seq1> [<seq2>] ...";
-
+    
     useOption("help");
     addOption("list", Option(Option::Boolean, "l", "Input", "List input. Lines in each <query> specify paths to sequence files, one per line. The reference file is not affected.", ""));
     addOption("comment", Option(Option::Boolean, "C", "Output", "Use comment fields for sequence names instead of IDs.", ""));
@@ -47,26 +47,26 @@ int CommandTriangle::run() const
         print();
         return 0;
     }
-
+    
     int threads = options.at("threads").getArgumentAsNumber();
     bool list = options.at("list").active;
     //bool log = options.at("log").active;
     double pValueMax = 0;
     bool comment = options.at("comment").active;
-
+    
     Sketch::Parameters parameters;
 
     if ( sketchParameterSetup(parameters, *(Command *)this) )
     {
-        return 1;
+    	return 1;
     }
     const bool emitJaccard = getOption("jaccard").getArgumentAsNumber();
 
     if ( arguments.size() == 1 )
     {
-        parameters.concatenated = false;
+    	parameters.concatenated = false;
     }
-
+    
     Sketch sketch;
 
     uint64_t lengthMax;
@@ -74,7 +74,7 @@ int CommandTriangle::run() const
     int kMin;
     string lengthMaxName;
     int warningCount = 0;
-
+    
     vector<string> queryFiles;
 
     for ( int i = 0; i < arguments.size(); i++ )
@@ -88,54 +88,54 @@ int CommandTriangle::run() const
             queryFiles.push_back(arguments[i]);
         }
     }
-
+    
     sketch.initFromFiles(queryFiles, parameters);
-
+    
     double lengthThreshold = (parameters.warning * sketch.getKmerSpace()) / (1. - parameters.warning);
+    
+	for ( uint64_t i = 0; i < sketch.getReferenceCount(); i++ )
+	{
+		uint64_t length = sketch.getReference(i).length;
 
-    for ( uint64_t i = 0; i < sketch.getReferenceCount(); i++ )
-    {
-        uint64_t length = sketch.getReference(i).length;
+		if ( length > lengthThreshold )
+		{
+			if ( warningCount == 0 || length > lengthMax )
+			{
+				lengthMax = length;
+				lengthMaxName = sketch.getReference(i).name;
+				randomChance = sketch.getRandomKmerChance(i);
+				kMin = sketch.getMinKmerSize(i);
+			}
 
-        if ( length > lengthThreshold )
-        {
-            if ( warningCount == 0 || length > lengthMax )
-            {
-                lengthMax = length;
-                lengthMaxName = sketch.getReference(i).name;
-                randomChance = sketch.getRandomKmerChance(i);
-                kMin = sketch.getMinKmerSize(i);
-            }
-
-            warningCount++;
-        }
-    }
-
+			warningCount++;
+		}
+	}
+    
     cout << '\t' << sketch.getReferenceCount() << endl;
     cout << (comment ? sketch.getReference(0).comment : sketch.getReference(0).name) << endl;
-
+    
     ThreadPool<TriangleInput, TriangleOutput> threadPool(compare, threads);
 
     for ( uint64_t i = 1; i < sketch.getReferenceCount(); i++ )
     {
         threadPool.runWhenThreadAvailable(new TriangleInput(sketch, i, parameters, emitJaccard));
-
+        
         while ( threadPool.outputAvailable() )
         {
             writeOutput(threadPool.popOutputWhenAvailable(), comment, pValueMax);
         }
     }
-
+    
     while ( threadPool.running() )
     {
         writeOutput(threadPool.popOutputWhenAvailable(), comment, pValueMax);
     }
-
+    
     cerr << "Max p-value: " << pValueMax << endl;
 
     if ( warningCount > 0 && ! parameters.reads )
     {
-        warnKmerSize(parameters, *this, lengthMax, lengthMaxName, randomChance, kMin, warningCount);
+    	warnKmerSize(parameters, *this, lengthMax, lengthMaxName, randomChance, kMin, warningCount);
     }
 
     return 0;
@@ -143,38 +143,38 @@ int CommandTriangle::run() const
 
 void CommandTriangle::writeOutput(TriangleOutput * output, bool comment, double & pValueMax) const
 {
-    const Sketch & sketch = output->sketch;
-    const Sketch::Reference & ref = sketch.getReference(output->index);
-
-    cout << (comment ? ref.comment : ref.name);
-
+	const Sketch & sketch = output->sketch;
+	const Sketch::Reference & ref = sketch.getReference(output->index);
+	
+	cout << (comment ? ref.comment : ref.name);
+	
     for ( uint64_t i = 0; i < output->index; i++ )
     {
-        const CommandDistance::CompareOutput::PairOutput * pair = &output->pairs[i];
-        cout << '\t' << pair->distance;
-        if ( pair->pValue > pValueMax )
-        {
-            pValueMax = pair->pValue;
-        }
+	    const CommandDistance::CompareOutput::PairOutput * pair = &output->pairs[i];
+	    cout << '\t' << pair->distance;
+	    if ( pair->pValue > pValueMax )
+	    {
+	    	pValueMax = pair->pValue;
+	    }
     }
-    cout << endl;
-
+	cout << endl;
+    
     delete output;
 }
 
 CommandTriangle::TriangleOutput * compare(CommandTriangle::TriangleInput * input)
 {
     const Sketch & sketch = input->sketch;
-
+    
     CommandTriangle::TriangleOutput * output = new CommandTriangle::TriangleOutput(input->sketch, input->index);
-
+    
     uint64_t sketchSize = sketch.getMinHashesPerWindow();
-
+    
     for ( uint64_t i = 0; i < input->index; i++ )
     {
         compareSketches(&output->pairs[i], sketch.getReference(input->index), sketch.getReference(i), sketchSize, sketch.getKmerSize(), sketch.getKmerSpace(), -1., -1., input->emitJaccard);
     }
-
+    
     return output;
 }
 
