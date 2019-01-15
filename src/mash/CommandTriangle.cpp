@@ -106,7 +106,7 @@ int CommandTriangle::run() const
 				randomChance = sketch.getRandomKmerChance(i);
 				kMin = sketch.getMinKmerSize(i);
 			}
-
+		
 			warningCount++;
 		}
 	}
@@ -132,7 +132,7 @@ int CommandTriangle::run() const
     }
     
     cerr << "Max p-value: " << pValueMax << endl;
-
+    
     if ( warningCount > 0 && ! parameters.reads )
     {
     	warnKmerSize(parameters, *this, lengthMax, lengthMaxName, randomChance, kMin, warningCount);
@@ -150,7 +150,7 @@ void CommandTriangle::writeOutput(TriangleOutput * output, bool comment, double 
 	
     for ( uint64_t i = 0; i < output->index; i++ )
     {
-    	const CommandDistance::CompareOutput::PairOutput * pair = &output->pairs[i];
+        const CommandDistance::CompareOutput::PairOutput * pair = &output->pairs[i];
 	    cout << '\t' << pair->distance;
 	    if ( pair->pValue > pValueMax )
 	    {
@@ -172,7 +172,7 @@ CommandTriangle::TriangleOutput * compare(CommandTriangle::TriangleInput * input
     
     for ( uint64_t i = 0; i < input->index; i++ )
     {
-        compareSketches(&output->pairs[i], sketch.getReference(input->index), sketch.getReference(i), sketchSize, sketch.getKmerSize(), sketch.getKmerSpace(), -1., -1., input->emitJaccard);
+    	compareSketches(&output->pairs[i], sketch.getReference(input->index), sketch.getReference(i), sketchSize, sketch.getKmerSize(), sketch.getKmerSpace(), -1., -1., input->emitJaccard);
     }
     
     return output;
