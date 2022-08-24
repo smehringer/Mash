@@ -6,6 +6,7 @@
 
 #include "CommandScreen.h"
 #include "CommandDistance.h" // for pvalue
+#include <future>
 #include "Sketch.h"
 #include "kseq.h"
 #include <iostream>
@@ -13,6 +14,8 @@
 #include "ThreadPool.h"
 #include <math.h>
 #include "robin_hood.h"
+
+#include <raptor/search/load_index.hpp>
 
 #ifdef USE_BOOST
 	#include <boost/math/distributions/binomial.hpp>
@@ -40,7 +43,7 @@ CommandScreen::CommandScreen()
 	summary = "Determine whether query sequences are within a larger mixture of sequences.";
 	description = "Determine how well query sequences are contained within a mixture of sequences. The queries must be formatted as a single Mash sketch file (.msh), created with the `mash sketch` command. The <mixture> files can be contigs or reads, in fasta or fastq, gzipped or not, and \"-\" can be given for <mixture> to read from standard input. The <mixture> sequences are assumed to be nucleotides, and will be 6-frame translated if the <queries> are amino acids. The output fields are [identity, shared-hashes, median-multiplicity, p-value, query-ID, query-comment], where median-multiplicity is computed for shared hashes, based on the number of observations of those hashes within the mixture.";
     argumentString = "<queries>.msh <mixture> [<mixture>] ...";
-	
+
 	useOption("help");
 	useOption("threads");
 //	useOption("minCov");
@@ -58,30 +61,30 @@ int CommandScreen::run() const
 		print();
 		return 0;
 	}
-	
+
 	if ( ! hasSuffix(arguments[0], suffixSketch) )
 	{
 		cerr << "ERROR: " << arguments[0] << " does not look like a sketch (.msh)" << endl;
 		exit(1);
 	}
-	
-	bool sat = false;//options.at("saturation").active;
-	
+
+	// bool sat = false;//options.at("saturation").active;
+
     double pValueMax = options.at("pvalue").getArgumentAsNumber();
     double identityMin = options.at("identity").getArgumentAsNumber();
-    
+
     vector<string> refArgVector;
     refArgVector.push_back(arguments[0]);
-	
+
 	Sketch sketch;
     Sketch::Parameters parameters;
-	
+
     sketch.initFromFiles(refArgVector, parameters);
-    
+
     string alphabet;
     sketch.getAlphabetAsString(alphabet);
     setAlphabetFromString(parameters, alphabet.c_str());
-	
+
 	parameters.parallelism = options.at("threads").getArgumentAsNumber();
 	parameters.kmerSize = sketch.getKmerSize();
 	parameters.noncanonical = sketch.getNoncanonical();
@@ -89,36 +92,22 @@ int CommandScreen::run() const
 	parameters.preserveCase = sketch.getPreserveCase();
 	parameters.seed = sketch.getHashSeed();
 	parameters.minHashesPerWindow = sketch.getMinHashesPerWindow();
-	
-	HashTable hashTable;
+
+    auto RaptorIndex = raptor::raptor_index<raptor::index_structure::hibf>{};
+    double index_io_time{0.0};
+	auto cereal_worker = [&]() { raptor::load_index(RaptorIndex, arguments[0], index_io_time); };
+
 	robin_hood::unordered_map<uint64_t, std::atomic<uint32_t>> hashCounts;
 	robin_hood::unordered_map<uint64_t, list<uint32_t> > saturationByIndex;
-	
+
 	cerr << "Loading " << arguments[0] << "..." << endl;
-	
-	for ( int i = 0; i < sketch.getReferenceCount(); i++ )
-	{
-		const HashList & hashes = sketch.getReference(i).hashesSorted;
-		
-		for ( int j = 0; j < hashes.size(); j++ )
-		{
-			uint64_t hash = hashes.get64() ? hashes.at(j).hash64 : hashes.at(j).hash32;
-			
-			if ( hashTable.count(hash) == 0 )
-			{
-				hashCounts[hash] = 0;
-			}
-			
-			hashTable[hash].insert(i);
-		}
-	}
-	
-	cerr << "   " << hashTable.size() << " distinct hashes." << endl;
-	
+
+    auto cereal_handle = std::async(std::launch::async, cereal_worker);
+
 	robin_hood::unordered_set<MinHashHeap *> minHashHeaps;
-	
+
 	bool trans = (alphabet == alphabetProtein);
-	
+
 /*	if ( ! trans )
 	{
 		if ( alphabet != alphabetNucleotide )
@@ -126,17 +115,17 @@ int CommandScreen::run() const
 			cerr << "ERROR: <query> sketch must have nucleotide or amino acid alphabet" << endl;
 			exit(1);
 		}
-		
+
 		if ( sketch.getNoncanonical() )
 		{
 			cerr << "ERROR: nucleotide <query> sketch must be canonical" << endl;
 			exit(1);
 		}
 	}
-*/	
+*/
 	int queryCount = arguments.size() - 1;
 	cerr << (trans ? "Translating from " : "Streaming from ");
-	
+
 	if ( queryCount == 1 )
 	{
 		cerr << arguments[1];
@@ -145,14 +134,14 @@ int CommandScreen::run() const
 	{
 		cerr << queryCount << " inputs";
 	}
-	
+
 	cerr << "..." << endl;
-	
+
 	int kmerSize = parameters.kmerSize;
 	int minCov = 1;//options.at("minCov").getArgumentAsNumber();
-	
+
 	ThreadPool<CommandScreen::HashInput, CommandScreen::HashOutput> threadPool(hashSequence, parameters.parallelism);
-	
+
 	// open all query files for round robin
 	//
 	gzFile fps[queryCount];
@@ -167,23 +156,23 @@ int CommandScreen::run() const
 				cerr << "ERROR: '-' for stdin must be first query" << endl;
 				exit(1);
 			}
-			
+
 			fps[f - 1] = gzdopen(fileno(stdin), "r");
 		}
 		else
 		{
 			fps[f - 1] = gzopen(arguments[f].c_str(), "r");
-			
+
 			if ( fps[f - 1] == 0 )
 			{
 				cerr << "ERROR: could not open " << arguments[f] << endl;
 				exit(1);
 			}
 		}
-		
+
 		kseqs.push_back(kseq_init(fps[f - 1]));
 	}
-	
+
 	// perform round-robin, closing files as they end
 	//
 	int l;
@@ -203,12 +192,12 @@ int CommandScreen::run() const
 		else
 		{
 			l = kseq_read(*it);
-		
+
 			if ( l < -1 ) // error
 			{
 				break;
 			}
-		
+
 			if ( l == -1 ) // eof
 			{
 				kseq_destroy(*it);
@@ -220,94 +209,94 @@ int CommandScreen::run() const
 				//continue;
 			}
 		}
-		
+
 		if ( input.length() + (l >= kmerSize ? l + 1 : 0) > chunkSize || kseqs.begin() == kseqs.end() )
 		{
 			// chunk big enough or at the end; time to flush
-			
+
 			// buffer this out since kseq will overwrite (deleted by HashInput destructor)
 			//
 			char * seqCopy = new char[input.length()];
 			//
 			memcpy(seqCopy, input.c_str(), input.length());
-			
+
 			if ( minHashHeaps.begin() == minHashHeaps.end() )
 			{
 				minHashHeaps.emplace(new MinHashHeap(sketch.getUse64(), sketch.getMinHashesPerWindow()));
 			}
-			
+
 			threadPool.runWhenThreadAvailable(new HashInput(hashCounts, *minHashHeaps.begin(), seqCopy, input.length(), parameters, trans));
-		
+
 			input = "";
-		
+
 			minHashHeaps.erase(minHashHeaps.begin());
-		
+
 			while ( threadPool.outputAvailable() )
 			{
 				useThreadOutput(threadPool.popOutputWhenAvailable(), minHashHeaps);
 			}
 		}
-		
+
 		if ( kseqs.begin() == kseqs.end() )
 		{
 			break;
 		}
-		
+
 		count++;
-		
+
 		if ( l >= kmerSize )
 		{
 			input.append(1, '*');
 			input.append((*it)->seq.s, l);
 		}
-		
+
 		it++;
-		
+
 		if ( it == kseqs.end() )
 		{
 			it = kseqs.begin();
 		}
 	}
-	
+
 	if (  l != -1 )
 	{
 		cerr << "\nERROR: reading inputs" << endl;
 		exit(1);
 	}
-    
+
 	while ( threadPool.running() )
 	{
 		useThreadOutput(threadPool.popOutputWhenAvailable(), minHashHeaps);
 	}
-	
+
 	for ( int i = 0; i < queryCount; i++ )
 	{
 		gzclose(fps[i]);
 	}
-	
+
 	MinHashHeap minHashHeap(sketch.getUse64(), sketch.getMinHashesPerWindow());
-	
+
 	for ( auto i = minHashHeaps.begin(); i != minHashHeaps.end(); i++ )
 	{
 		HashList hashList(parameters.use64);
-		
+
 		(*i)->toHashList(hashList);
-		
+
 		for ( int i = 0; i < hashList.size(); i++ )
 		{
 			minHashHeap.tryInsert(hashList.at(i));
 		}
-		
+
 		delete *i;
 	}
-	
+
 	if ( count == 0 )
 	{
 		cerr << "\nERROR: Did not find sequence records in inputs" << endl;
-		
+
 		exit(1);
 	}
-	
+
 	/*
 	if ( parameters.targetCov != 0 )
 	{
@@ -318,145 +307,136 @@ int CommandScreen::run() const
 		cerr << "Estimated coverage: " << minHashHeap.estimateMultiplicity() << "x" << endl;
 	}
 	*/
-	
+
 	uint64_t setSize = minHashHeap.estimateSetSize();
 	cerr << "   Estimated distinct" << (trans ? " (translated)" : "") << " k-mers in mixture: " << setSize << endl;
-	
+
 	if ( setSize == 0 )
 	{
 		cerr << "WARNING: no valid k-mers in input." << endl;
 		//exit(0);
 	}
-	
+
 	cerr << "Summing shared..." << endl;
-	
+
 	uint64_t * shared = new uint64_t[sketch.getReferenceCount()];
 	vector<uint64_t> * depths = new vector<uint64_t>[sketch.getReferenceCount()];
-	
-	memset(shared, 0, sizeof(uint64_t) * sketch.getReferenceCount());
-	
-	for ( auto i = hashCounts.begin(); i != hashCounts.end(); i++ )
-	{
-		if ( i->second >= minCov )
-		{
-			const auto & indeces = hashTable.at(i->first);
 
-			for ( auto k = indeces.begin(); k != indeces.end(); k++ )
-			{
-				shared[*k]++;
-				depths[*k].push_back(i->second);
-			
-				if ( sat )
-				{
-					saturationByIndex[*k].push_back(0);// TODO kmersTotal);
-				}
-			}
-		}
-	}
-	
+	memset(shared, 0, sizeof(uint64_t) * sketch.getReferenceCount());
+
+	cereal_handle.wait(); // index must be loaded copletely before accessing it
+	auto RaptorIndexAgent = RaptorIndex.ibf().counting_agent();
+
+	const auto & counts = RaptorIndexAgent.bulk_count(hashCounts);
+
+	for ( size_t i = 0; i < counts.size(); ++i )
+		shared[i] = counts[i]; // copy over counts
+
 	if ( options.at("winning!").active )
 	{
-		cerr << "Reallocating to winners..." << endl;
-		
-		double * scores = new double[sketch.getReferenceCount()];
-		
-		for ( int i = 0; i < sketch.getReferenceCount(); i ++ )
-		{
-			scores[i] = estimateIdentity(shared[i], sketch.getReference(i).hashesSorted.size(), kmerSize, sketch.getKmerSpace());
-		}
-		
-		memset(shared, 0, sizeof(uint64_t) * sketch.getReferenceCount());
-		
-		for ( int i = 0; i < sketch.getReferenceCount(); i++ )
-		{
-			depths[i].clear();
-		}
-		
-		for ( HashTable::const_iterator i = hashTable.begin(); i != hashTable.end(); i++ )
-		{
-			if ( hashCounts.count(i->first) == 0 || hashCounts.at(i->first) < minCov )
-			{
-				continue;
-			}
-			
-			const auto & indeces = i->second;
-			double maxScore = 0;
-			uint64_t maxLength = 0;
-			uint64_t maxIndex;
-			
-			for ( auto k = indeces.begin(); k != indeces.end(); k++ )
-			{
-				if ( scores[*k] > maxScore )
-				{
-					maxScore = scores[*k];
-					maxIndex = *k;
-					maxLength = sketch.getReference(*k).length;
-				}
-				else if ( scores[*k] == maxScore && sketch.getReference(*k).length > maxLength )
-				{
-					maxIndex = *k;
-					maxLength = sketch.getReference(*k).length;
-				}
-			}
-			
-			shared[maxIndex]++;
-			depths[maxIndex].push_back(hashCounts.at(i->first));
-		}
-		
-		delete [] scores;
+		cerr << "Option winning currently disabled..." << endl;
+		// cerr << "Reallocating to winners..." << endl;
+
+		// double * scores = new double[sketch.getReferenceCount()];
+
+		// for ( int i = 0; i < sketch.getReferenceCount(); i ++ )
+		// {
+		// 	scores[i] = estimateIdentity(shared[i], sketch.getReference(i).hashesSorted.size(), kmerSize, sketch.getKmerSpace());
+		// }
+
+		// memset(shared, 0, sizeof(uint64_t) * sketch.getReferenceCount());
+
+		// for ( int i = 0; i < sketch.getReferenceCount(); i++ )
+		// {
+		// 	depths[i].clear();
+		// }
+
+		// for ( HashTable::const_iterator i = hashTable.begin(); i != hashTable.end(); i++ )
+		// {
+		// 	if ( hashCounts.count(i->first) == 0 || hashCounts.at(i->first) < minCov )
+		// 	{
+		// 		continue;
+		// 	}
+
+		// 	const auto & indeces = i->second;
+		// 	double maxScore = 0;
+		// 	uint64_t maxLength = 0;
+		// 	uint64_t maxIndex;
+
+		// 	for ( auto k = indeces.begin(); k != indeces.end(); k++ )
+		// 	{
+		// 		if ( scores[*k] > maxScore )
+		// 		{
+		// 			maxScore = scores[*k];
+		// 			maxIndex = *k;
+		// 			maxLength = sketch.getReference(*k).length;
+		// 		}
+		// 		else if ( scores[*k] == maxScore && sketch.getReference(*k).length > maxLength )
+		// 		{
+		// 			maxIndex = *k;
+		// 			maxLength = sketch.getReference(*k).length;
+		// 		}
+		// 	}
+
+		// 	shared[maxIndex]++;
+		// 	depths[maxIndex].push_back(hashCounts.at(i->first));
+		// }
+
+		// delete [] scores;
 	}
-	
+
 	cerr << "Computing coverage medians..." << endl;
-	
+
 	for ( int i = 0; i < sketch.getReferenceCount(); i++ )
 	{
 		sort(depths[i].begin(), depths[i].end());
 	}
-	
+
 	cerr << "Writing output..." << endl;
-	
+
 	for ( int i = 0; i < sketch.getReferenceCount(); i++ )
 	{
 		if ( shared[i] != 0 || identityMin < 0.0)
 		{
 			double identity = estimateIdentity(shared[i], sketch.getReference(i).hashesSorted.size(), kmerSize, sketch.getKmerSpace());
-			
+
 			if ( identity < identityMin )
 			{
 				continue;
 			}
-			
+
 			double pValue = pValueWithin(shared[i], setSize, sketch.getKmerSpace(), sketch.getReference(i).hashesSorted.size());
-			
+
 			if ( pValue > pValueMax )
 			{
 				continue;
 			}
-			
+
 			cout << identity << '\t' << shared[i] << '/' << sketch.getReference(i).hashesSorted.size() << '\t' << (shared[i] > 0 ? depths[i].at(shared[i] / 2) : 0) << '\t' << pValue << '\t' << sketch.getReference(i).name << '\t' << sketch.getReference(i).comment;
-			
-			if ( sat )
-			{
-				cout << '\t';
-				
-				for ( list<uint32_t>::const_iterator j = saturationByIndex.at(i).begin(); j != saturationByIndex.at(i).end(); j++ )
-				{
-					if ( j != saturationByIndex.at(i).begin() )
-					{
-						cout << ',';
-					}
-					
-					cout << *j;
-				}
-			}
-			
+
+			// data not available
+			// if ( sat )
+			// {
+			// 	cout << '\t';
+
+			// 	for ( list<uint32_t>::const_iterator j = saturationByIndex.at(i).begin(); j != saturationByIndex.at(i).end(); j++ )
+			// 	{
+			// 		if ( j != saturationByIndex.at(i).begin() )
+			// 		{
+			// 			cout << ',';
+			// 		}
+
+			// 		cout << *j;
+			// 	}
+			// }
+
 			cout << endl;
 		}
 	}
-	
+
 	delete [] depths;
 	delete [] shared;
-	
+
 	return 0;
 }
 
@@ -464,7 +444,7 @@ double estimateIdentity(uint64_t common, uint64_t denom, int kmerSize, double km
 {
 	double identity;
 	double jaccard = double(common) / denom;
-	
+
 	if ( common == denom ) // avoid -0
 	{
 		identity = 1.;
@@ -477,24 +457,24 @@ double estimateIdentity(uint64_t common, uint64_t denom, int kmerSize, double km
 	{
 		identity = pow(jaccard, 1. / kmerSize);
 	}
-	
+
 	return identity;
 }
 
 CommandScreen::HashOutput * hashSequence(CommandScreen::HashInput * input)
 {
 	CommandScreen::HashOutput * output = new CommandScreen::HashOutput(input->minHashHeap);
-	
+
 	int l = input->length;
 	bool trans = input->trans;
-	
+
 	bool use64 = input->parameters.use64;
 	uint32_t seed = input->parameters.seed;
 	int kmerSize = input->parameters.kmerSize;
 	bool noncanonical = input->parameters.noncanonical;
-	
+
 	char * seq = input->seq;
-	
+
 	// uppercase
 	//
 	for ( uint64_t i = 0; i < l; i++ )
@@ -504,53 +484,53 @@ CommandScreen::HashOutput * hashSequence(CommandScreen::HashInput * input)
 			seq[i] -= 32;
 		}
 	}
-	
+
 	char * seqRev;
-	
+
 	if ( ! noncanonical || trans )
 	{
 		seqRev = new char[l];
 		reverseComplement(seq, seqRev, l);
 	}
-	
+
 	for ( int i = 0; i < (trans ? 6 : 1); i++ )
 	{
 		bool useRevComp = false;
 		int frame = i % 3;
 		bool rev = i > 2;
-		
+
 		int lenTrans = (l - frame) / 3;
-		
+
 		char * seqTrans;
-		
+
 		if ( trans )
 		{
 			seqTrans = new char[lenTrans];
 			translate((rev ? seqRev : seq) + frame, seqTrans, lenTrans);
 		}
-		
+
 		int64_t lastGood = -1;
 		int length = trans ? lenTrans : l;
-		
+
 		for ( int j = 0; j < length - kmerSize + 1; j++ )
 		{
 			while ( lastGood < j + kmerSize - 1 && lastGood < length )
 			{
 				lastGood++;
-				
+
 				if ( trans ? (seqTrans[lastGood] == '*') : (!input->parameters.alphabet[seq[lastGood]]) )
 				{
 					j = lastGood + 1;
 				}
 			}
-			
+
 			if ( j > length - kmerSize )
 			{
 				break;
 			}
-			
+
 			const char * kmer;
-			
+
 			if ( trans )
 			{
 				kmer = seqTrans + j;
@@ -561,40 +541,40 @@ CommandScreen::HashOutput * hashSequence(CommandScreen::HashInput * input)
 				const char *kmer_rev = seqRev + length - j - kmerSize;
 				kmer = (noncanonical || memcmp(kmer_fwd, kmer_rev, kmerSize) <= 0) ? kmer_fwd : kmer_rev;
 			}
-			
+
 			//cout << kmer << '\t' << kmerSize << endl;
 			hash_u hash = getHash(kmer, kmerSize, seed, use64);
 			//cout << kmer << '\t' << hash.hash64 << endl;
 			input->minHashHeap->tryInsert(hash);
 			uint64_t key = use64 ? hash.hash64 : hash.hash32;
-			
+
 			if ( input->hashCounts.count(key) == 1 )
 			{
 				//cout << "Incrementing " << key << endl;
 				input->hashCounts[key]++;
 			}
 		}
-		
+
 		if ( trans )
 		{
 			delete [] seqTrans;
 		}
 	}
-	
+
 	if ( ! noncanonical || trans )
 	{
 		delete [] seqRev;
 	}
 	/*
 	addMinHashes(minHashHeap, seq, l, parameters);
-	
+
 	if ( parameters.targetCov > 0 && minHashHeap.estimateMultiplicity() >= parameters.targetCov )
 	{
 		l = -1; // success code
 		break;
 	}
 	*/
-	
+
 	return output;
 }
 
@@ -604,9 +584,9 @@ double pValueWithin(uint64_t x, uint64_t setSize, double kmerSpace, uint64_t ske
     {
         return 1.;
     }
-    
+
     double r = double(setSize) / kmerSpace;
-    
+
 #ifdef USE_BOOST
     return cdf(complement(binomial(sketchSize, r), x - 1));
 #else
@@ -636,7 +616,7 @@ char aaFromCodon(const char * codon)
 	}
 	*/
 	char aa = '*';//0;
-	
+
 	switch (codon[0])
 	{
 	case 'A':
@@ -804,7 +784,7 @@ char aaFromCodon(const char * codon)
 		}
 		break;
 	}
-	
+
 	return aa;//(aa == '*') ? 0 : aa;
 }
 

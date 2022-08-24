@@ -7,6 +7,7 @@
 #include "CommandBounds.h"
 #include "CommandList.h"
 #include "CommandSketch.h"
+#include "CommandIndex.h"
 #include "CommandFind.h"
 #include "CommandDistance.h"
 #include "CommandScreen.h"
@@ -19,8 +20,9 @@
 int main(int argc, const char ** argv)
 {
     mash::CommandList commandList("mash");
-    
+
     commandList.addCommand(new mash::CommandSketch());
+    commandList.addCommand(new mash::CommandIndex());
     //commandList.addCommand(new CommandFind());
     commandList.addCommand(new mash::CommandDistance());
     commandList.addCommand(new mash::CommandScreen());
@@ -35,6 +37,6 @@ int main(int argc, const char ** argv)
     commandList.addCommand(new mash::CommandInfo());
     commandList.addCommand(new mash::CommandPaste());
     commandList.addCommand(new mash::CommandBounds());
-    
+
     return commandList.run(argc, argv);
 }

@@ -6,7 +6,7 @@ UNAME_S=$(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 	CXXFLAGS += -mmacosx-version-min=10.7 -stdlib=libc++
 else
-	CXXFLAGS += -include src/mash/memcpyLink.h -Wl,--wrap=memcpy
+	CXXFLAGS += -include src/mash/memcpyLink.h -Wl,--wrap=memcpy -I lib/raptor/include -I lib/raptor/lib/seqan3/include -I lib/raptor/lib/submodules/sdsl-lite/include -I lib/raptor/lib/submodules/sharg-parser/include -I lib/raptor/lib/submodules/cereal/include -I lib/raptor/lib/chopper/include -std=c++20
 	CFLAGS += -include src/mash/memcpyLink.h
 endif
 
@@ -22,6 +22,7 @@ SOURCES=\
 	src/mash/CommandInfo.cpp \
 	src/mash/CommandPaste.cpp \
 	src/mash/CommandSketch.cpp \
+	src/mash/CommandIndex.cpp \
 	src/mash/CommandList.cpp \
 	src/mash/hash.cpp \
 	src/mash/HashList.cpp \
