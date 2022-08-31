@@ -1,14 +1,27 @@
-CXXFLAGS += -O3 -std=c++14 -Isrc -I@capnp@/include -I@mathinc@
+CXXFLAGS += -O3 -std=c++20 -Isrc -I@capnp@/include -I@mathinc@
 CPPFLAGS += @amcppflags@
 
 UNAME_S=$(shell uname -s)
-
-ifeq ($(UNAME_S),Darwin)
-	CXXFLAGS += -mmacosx-version-min=10.7 -stdlib=libc++
-else
-	CXXFLAGS += -include src/mash/memcpyLink.h -Wl,--wrap=memcpy -I lib/raptor/include -I lib/raptor/lib/seqan3/include -I lib/raptor/lib/submodules/sdsl-lite/include -I lib/raptor/lib/submodules/sharg-parser/include -I lib/raptor/lib/submodules/cereal/include -I lib/raptor/lib/chopper/include -std=c++20
-	CFLAGS += -include src/mash/memcpyLink.h
-endif
+CXXFLAGS += -include src/mash/memcpyLink.h \
+	        -Wl,--wrap=memcpy \
+	        -I src \
+	        -isystem lib/raptor/include \
+	        -isystem lib/raptor/lib/seqan3/include \
+	        -isystem lib/raptor/lib/submodules/sdsl-lite/include \
+	        -isystem lib/raptor/lib/submodules/sharg-parser/include \
+	        -isystem lib/raptor/lib/submodules/cereal/include \
+	        -isystem lib/raptor/lib/chopper/include \
+            -isystem lib/raptor/lib/simde/simde \
+            -isystem lib/raptor/lib/robin-hood-hashing/src/include \
+            -isystem lib/xxHash \
+	        -std=c++20 \
+	        -DSEQAN3_HAS_ZLIB=1 \
+	        -DSEQAN3_HAS_BZIP2=1 \
+            -DRAPTOR_HIBF_HAS_COUNT=1 \
+	        -lz \
+	        -lbz2 \
+	        -pthread
+CFLAGS += -include src/mash/memcpyLink.h
 
 SOURCES=\
 	src/mash/Command.cpp \
@@ -38,6 +51,14 @@ OBJECTS=$(SOURCES:.cpp=.o) src/mash/capnp/MinHash.capnp.o
 
 all : mash libmash.a
 
+lib/xxHash/xxh3.h:
+	cd lib/xxHash && make
+xxHash: lib/xxHash/xxh3.h
+
+#lib/raptor_lib.a:
+#	mkdir -p build && cd build && cmake ../lib/raptor && make -j4 raptor_build raptor_build_hibf raptor_search raptor_threshold
+#raptor: lib/raptor_lib.a
+
 mash : libmash.a src/mash/memcpyWrap.o
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o mash src/mash/memcpyWrap.o libmash.a @capnp@/lib/libcapnp.a @capnp@/lib/libkj.a @mathlib@ -lstdc++ -lz -lm -lpthread
 
@@ -47,8 +68,8 @@ libmash.a : $(OBJECTS)
 
 .SUFFIXES :
 
-%.o : %.cpp src/mash/capnp/MinHash.capnp.h
-	$(CXX) -c $(CXXFLAGS) $(CPPFLAGS) -o $@ $<
+%.o : %.cpp src/mash/capnp/MinHash.capnp.h xxHash #raptor
+	$(CXX) -c $(CXXFLAGS) $(CPPFLAGS) -o $@ $< #before $: build/lib/libchopper_count_lib.a build/lib/libchopper_layout_lib.a build/lib/libraptor_build_hibf.a build/lib/libraptor_build.a build/lib/libraptor_search.a build/lib/libraptor_threshold.a
 
 %.o : %.c++
 	$(CXX) -c $(CXXFLAGS) $(CPPFLAGS) -o $@ $<
