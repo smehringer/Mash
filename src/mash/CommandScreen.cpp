@@ -95,7 +95,9 @@ int CommandScreen::run() const
 
     auto RaptorIndex = raptor::raptor_index<raptor::index_structure::hibf>{};
     double index_io_time{0.0};
-	auto cereal_worker = [&]() { raptor::load_index(RaptorIndex, arguments[0], index_io_time); };
+	raptor::search_arguments search_args{};
+	search_args.index_file = arguments[0];
+	auto cereal_worker = [&]() { raptor::load_index(RaptorIndex, search_args, index_io_time); };
 
 	robin_hood::unordered_map<uint64_t, std::atomic<uint32_t>> hashCounts;
 	robin_hood::unordered_map<uint64_t, list<uint32_t> > saturationByIndex;
