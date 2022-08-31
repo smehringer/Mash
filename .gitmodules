@@ -1,0 +1,3 @@
+[submodule "lib/raptor"]
+	path = lib/raptor
+	url = https://github.com/seqan/raptor.git
