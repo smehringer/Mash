@@ -25,7 +25,7 @@ public:
             index(indexNew),
             parameters(parametersNew),
             maxDistance(maxDistanceNew),
-            maxPValue(maxPValueNew)
+            maxPValue(maxPValueNew),
             emitJaccard(emitJaccard_)
             {}
 
